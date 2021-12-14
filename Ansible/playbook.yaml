@@ -1,0 +1,134 @@
+pre_tasks:
+
+    - name: crear maquina virtual.
+      command: minikube start --vm-driver=virtualbox --no-vtx-check
+      when: "not minikube_status.stdout or 'Running' not in minikube_status.stdout"
+ 
+ tasks:
+
+    - name: crear deploy para la db.
+      k8s:
+        state: present
+        definition:
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: makdb
+            namespace: marroyo
+          spec:
+            replicas: "1"
+            selector:
+              matchLabels:
+                app: appweb
+            template:
+              metadata:
+                labels:
+                  app: appweb
+              spec:
+                containers:
+                - name: appwebcontenedor
+                  image: aideeds/dbmaq
+                  imagePullPolicy: IfNotPresent
+                  ports:
+                  - containerPort: 3306
+
+                  volumeMounts:
+                  - name: volumdb
+                  mountPath: var/lib/mysql
+
+              volumes:  
+              - name: volumdb 
+  
+                persistentVolumeClaim:  
+                  claimName: volumdbClaim
+
+    - name: crear deploy de la aplicacion.
+      k8s:
+        state: present
+        definition:
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: appm
+            namespace: marroyo
+          spec:
+            replicas: "1"
+            selector:
+              matchLabels:
+                app: webapp
+            template:
+              metadata:
+                labels:
+                  app: webapp
+              spec:
+                containers:
+                - name: appmcontenedor
+                  image: aideeds/aplicacion
+                  imagePullPolicy: IfNotPresent
+                  ports:
+                  - containerPort: 80
+
+    - name: crear servicio de la db.
+      k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: localhost2
+            namespace: marroyo
+          spec:
+            type: NodePort
+            ports:
+            - port: 3306
+              targetPort: 3306
+            selector:
+              app: appweb
+  
+    - name: crear servicio de la aplicacion.
+      k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: appms
+            labels:
+              app: webapp
+            namespace: marroyo
+          spec:
+            type: NodePort
+            ports:
+            - port: 80
+              targetPort: 80
+            selector:
+              app: webapp
+
+    - name: creacion del namespace.
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: marroyo
+        labels: 
+          tipo: appsweb
+
+    - name: creacion del ingress.
+    apiVersion: networking.k8s.io/v1
+    kind: Ingress
+    metadata:
+      name: ingress-apli
+      annotations:
+        nginx.ingress.kubernetes.io/rewrite-target: /
+
+    spec:
+      rules:
+      - host: app.marroyo.com
+        http:
+          paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: appms
+                port:
+                  number: 80
